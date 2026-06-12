@@ -1,17 +1,69 @@
 print("=" * 70)
-print("PHASE 9 — BÁO CÁO KẾT LUẬN")
+print("PHASE 8 — BÁO CÁO KẾT LUẬN")
 print("=" * 70)
 
 dataset_start = df_monthly.index.min().strftime("%m/%Y")
 dataset_end = df_monthly.index.max().strftime("%m/%Y")
 n_months = len(df_monthly)
-n_weather_features = len(globals().get("available_meteo_cols", []))
+n_context_features = len(globals().get("available_meteo_cols", []))
+
+month_avg_report = df_monthly.groupby("Month")["Rainfall"].mean()
+overall_month_mean = float(df_monthly["Rainfall"].mean())
+peak_month = int(month_avg_report.idxmax())
+low_month = int(month_avg_report.idxmin())
+peak_value = float(month_avg_report.loc[peak_month])
+low_value = float(month_avg_report.loc[low_month])
+
+
+def month_name(month_num):
+    names = globals().get("thang_day")
+    if names and 1 <= month_num <= len(names):
+        return names[month_num - 1]
+    return f"Tháng {month_num}"
+
+
+def month_list(months):
+    return ", ".join(f"T{int(m)}" for m in months)
+
+
+above_mean_months = month_avg_report[month_avg_report > overall_month_mean].index.tolist()
+below_mean_months = month_avg_report[month_avg_report <= overall_month_mean].index.tolist()
+
+season_strength_value = globals().get("season_strength", float("nan"))
+if not np.isnan(season_strength_value):
+    if season_strength_value >= 0.6:
+        season_text = "mạnh"
+    elif season_strength_value >= 0.35:
+        season_text = "vừa"
+    else:
+        season_text = "yếu"
+else:
+    season_text = "chưa tính"
+
+trend_text = "Không đủ kết quả ADF/KPSS để nhận xét xu hướng."
+if "adf_pvalue" in globals() and "kpss_pvalue" in globals():
+    if adf_pvalue < 0.05 and kpss_pvalue >= 0.05:
+        trend_text = (
+            "ADF và KPSS cùng ủng hộ nhận xét: chuỗi mưa chủ yếu dao động theo mùa; "
+            "chưa thấy xu hướng tăng hoặc giảm đều trong toàn kỳ dữ liệu."
+        )
+    elif adf_pvalue < 0.05:
+        trend_text = "ADF cho tín hiệu chuỗi khá ổn định, nhưng KPSS chưa đồng thuận rõ."
+    elif kpss_pvalue >= 0.05:
+        trend_text = "KPSS cho tín hiệu chuỗi khá ổn định, nhưng ADF chưa đồng thuận rõ."
+    else:
+        trend_text = "ADF và KPSS chưa đủ đồng thuận để nhận xét chuỗi ổn định."
 
 cv_mean = globals().get("_cv_mean", {})
 cv_rmse = cv_mean.get(forecast_model_name, float("nan"))
 holdout_rmse = (
     metrics_df.loc[forecast_model_name, "RMSE"]
-    if forecast_model_name in metrics_df.index
+    if "metrics_df" in globals() and forecast_model_name in metrics_df.index
+    else float("nan")
+)
+holdout_wape = (
+    metrics_df.loc[forecast_model_name, "WAPE (%)"]
+    if "metrics_df" in globals() and forecast_model_name in metrics_df.index
     else float("nan")
 )
 
@@ -21,78 +73,86 @@ if "top_meteo_correlations" in globals() and len(top_meteo_correlations) > 0:
 
 print("\n1. TỔNG QUAN DỮ LIỆU")
 print("-" * 70)
-print(f"Đề tài              : {PROJECT_TITLE}")
-print(f"Nguồn dữ liệu       : Open-Meteo Historical Weather API (ERA5 reanalysis)")
-print(f"Phương pháp không gian: Trung bình 7 tọa độ đại diện TP.HCM")
-print(f"Thành phố            : {city_name}")
-print(f"Thời gian            : {dataset_start} → {dataset_end}")
-print(f"Số quan sát          : {n_months} tháng")
-print(f"Biến mục tiêu        : {TARGET_LABEL} ({TARGET_UNIT})")
-print(f"Số biến khí tượng    : {n_weather_features}")
+print(f"Đề tài                 : {PROJECT_TITLE}")
+print("Nguồn dữ liệu          : Open-Meteo Historical Weather API (ERA5 reanalysis)")
+print("Phương pháp không gian : Trung bình 7 tọa độ đại diện TP.HCM")
+print(f"Thành phố              : {city_name}")
+print(f"Thời gian              : {dataset_start} → {dataset_end}")
+print(f"Số quan sát            : {n_months} tháng")
+print(f"Biến mục tiêu          : {TARGET_LABEL} ({TARGET_UNIT})")
+print(f"Số biến khí tượng/context trong phân tích: {n_context_features}")
 
-print("\n2. ĐẶC ĐIỂM CHUỖI THỜI GIAN")
+print("\n2. NHỮNG GÌ SỐ LIỆU CHO THẤY")
 print("-" * 70)
-print("TP.HCM có mùa mưa rõ rệt từ T5–T11 và mùa khô từ T12–T4.")
-print("Đỉnh mưa tập trung quanh tháng 9; phù hợp khí hậu nhiệt đới gió mùa.")
-if "season_strength" in globals():
-    print(f"Season strength     : {season_strength:.3f} → mùa vụ mạnh.")
-print("ADF/KPSS/ACF/PACF được dùng để kiểm tra stationarity và autocorrelation.")
+print(f"Lượng mưa TB toàn kỳ   : {overall_month_mean:.2f} {target_unit}")
+print(f"Tháng TB cao nhất      : {month_name(peak_month)} ({peak_value:.2f} {target_unit})")
+print(f"Tháng TB thấp nhất     : {month_name(low_month)} ({low_value:.2f} {target_unit})")
+print(f"Tháng cao hơn TB chung : {month_list(above_mean_months)}")
+print(f"Tháng thấp/bằng TB chung: {month_list(below_mean_months)}")
+if not np.isnan(season_strength_value):
+    print(f"Độ mạnh mùa vụ         : {season_strength_value:.3f} → {season_text}")
+print(trend_text)
 
-print("\n3. PHÂN TÍCH BIẾN KHÍ TƯỢNG")
+print("\n3. BIẾN THỜI TIẾT ĐI CÙNG MƯA")
 print("-" * 70)
 if top_corr_names:
-    print(f"Biến tương quan mạnh với Rainfall: {', '.join(top_corr_names)}")
-print("Các biến khí tượng chỉ dùng dạng lag/rolling quá khứ trong forecast.")
-print("Không dùng giá trị cùng tháng để tránh data leakage.")
+    print(f"Top biến tương quan với Rainfall: {', '.join(top_corr_names)}")
+print("Tương quan chỉ nói các biến đi cùng nhau, không chứng minh nguyên nhân.")
+print("Khi dự báo, code chỉ dùng dữ liệu quá khứ/rolling để tránh nhìn trước tương lai.")
 
 print("\n4. SO SÁNH MÔ HÌNH")
 print("-" * 70)
 if "metrics_df" in globals():
     print(metrics_df.to_string())
-print("\nRolling-Origin CV được ưu tiên hơn hold-out đơn lẻ.")
+if cv_mean:
+    print("\nCV-RMSE trung bình qua nhiều cửa sổ:")
+    for name, value in sorted(cv_mean.items(), key=lambda item: item[1]):
+        print(f"  {name:<20}: {value:.2f} {target_unit}")
 
-print("\n5. LỰA CHỌN MÔ HÌNH")
+print("\n5. MÔ HÌNH ĐƯỢC CHỌN")
 print("-" * 70)
-print(f"Mô hình được chọn    : {forecast_model_name}")
-if not np.isnan(cv_rmse):
-    print(f"CV-RMSE              : {cv_rmse:.2f} {target_unit}")
+print(f"Mô hình được chọn      : {forecast_model_name}")
 if not np.isnan(holdout_rmse):
-    print(f"Hold-out RMSE        : {holdout_rmse:.2f} {target_unit}")
-if "best_accuracy_model" in globals() and best_accuracy_model != forecast_model_name:
-    print(f"Best hold-out model  : {best_accuracy_model}")
-    print("Lý do không chọn    : hold-out chỉ là một cửa sổ; ưu tiên CV-RMSE.")
+    print(f"Hold-out RMSE          : {holdout_rmse:.2f} {target_unit}")
+if not np.isnan(holdout_wape):
+    print(f"Hold-out WAPE          : {holdout_wape:.2f}%")
+if not np.isnan(cv_rmse):
+    print(f"CV-RMSE trung bình     : {cv_rmse:.2f} {target_unit}")
+if "best_accuracy_model" in globals():
+    print(f"Mô hình tốt nhất trên hold-out: {best_accuracy_model}")
+print("Cách hiểu              : đây là mô hình tốt nhất trong 4 mô hình đã thử, không phải bảo đảm đúng tuyệt đối.")
 
 print("\n6. DỰ BÁO")
 print("-" * 70)
 if "future_index" in globals() and "future_forecast" in globals():
-    print(f"Giai đoạn forecast   : {future_index[0]:%m/%Y} → {future_index[-1]:%m/%Y}")
+    print(f"Giai đoạn dự báo       : {future_index[0]:%m/%Y} → {future_index[-1]:%m/%Y}")
     if "forecast_period_sum" in globals():
-        print(f"Tổng mưa dự báo      : {forecast_period_sum:.1f} mm")
-    thang_mua = future_forecast.idxmax()
-    thang_kho = future_forecast.idxmin()
+        print(f"Tổng mưa dự báo        : {forecast_period_sum:.1f} mm")
+    forecast_peak = future_forecast.idxmax()
+    forecast_low = future_forecast.idxmin()
     print(
-        f"Tháng mưa nhiều nhất : {thang_mua:%m/%Y} "
-        f"({future_forecast.loc[thang_mua]:.2f} {target_unit})"
+        f"Tháng dự báo cao nhất  : {forecast_peak:%m/%Y} "
+        f"({future_forecast.loc[forecast_peak]:.2f} {target_unit})"
     )
     print(
-        f"Tháng mưa ít nhất    : {thang_kho:%m/%Y} "
-        f"({future_forecast.loc[thang_kho]:.2f} {target_unit})"
+        f"Tháng dự báo thấp nhất : {forecast_low:%m/%Y} "
+        f"({future_forecast.loc[forecast_low]:.2f} {target_unit})"
     )
 
 print("\n7. HẠN CHẾ")
 print("-" * 70)
-print("- Open-Meteo là dữ liệu tái phân tích (ERA5), có thể khác số liệu trạm thực địa.")
-print("- Không dùng dữ liệu khí tượng tương lai thật; các model weather dùng proxy/climatology.")
-print("- Sai số dự báo mùa tháng vẫn cao do mưa chịu ảnh hưởng nhiều hiện tượng khí hậu.")
-print("- Trung bình 7 tọa độ là xấp xỉ, không thay thế được mạng lưới đo thực địa dày đặc.")
+print("- ERA5 là dữ liệu tái phân tích, có thể khác số đo trạm thực địa.")
+print("- Dự báo 12 tháng dùng proxy/climatology cho thời tiết tương lai, không có số thời tiết tương lai thật.")
+print("- Sai số theo tháng còn lớn, nhất là mùa mưa.")
+print("- Trung bình 7 tọa độ chỉ là đại diện toàn thành phố ở mức xấp xỉ.")
 
 print("\n8. HƯỚNG PHÁT TRIỂN")
 print("-" * 70)
-print("- Thêm ENSO/ONI/Nino3.4, SST, MJO để có tín hiệu khí hậu dự báo trước.")
-print("- Nếu có dữ liệu dự báo khí tượng tháng tới thật, có thể dùng làm exogenous hợp lệ.")
-print("- Kiểm định thêm prediction interval coverage trên rolling-origin CV.")
-print("- Thử nghiệm Deep Learning (LSTM, Temporal Fusion Transformer) nếu có đủ dữ liệu.")
+print("- Thêm ENSO/ONI/Nino3.4, SST, MJO rồi kiểm tra xem sai số có giảm không.")
+print("- Nếu có dự báo thời tiết tháng tới thật, đưa vào làm biến hỗ trợ và đánh giá lại.")
+print("- Kiểm tra khoảng dự báo thấp/cao trên dữ liệu quá khứ để biết khoảng đó có đáng tin không.")
+print("- Chỉ thử Deep Learning khi có thêm dữ liệu hoặc có mục tiêu so sánh rõ ràng.")
 
 print("=" * 70)
-print("✅ Phase 9 hoàn tất — kết luận sẵn sàng đưa vào report/slide.")
+print("✅ Phase 8 hoàn tất — kết luận đã bám theo số liệu đang chạy.")
 print("=" * 70)

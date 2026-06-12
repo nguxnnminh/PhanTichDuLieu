@@ -2,11 +2,11 @@ from statsmodels.graphics.tsaplots import plot_acf
 from statsmodels.stats.diagnostic import acorr_ljungbox
 
 print("=" * 70)
-print("PHASE 7 — RESIDUAL DIAGNOSTICS")
+print("PHASE 6 — RESIDUAL DIAGNOSTICS")
 print("=" * 70)
 
 if "forecasts" not in globals():
-    raise NameError("Phase 7 cần forecasts dict từ Phase 6.")
+    raise NameError("Phase 6 cần forecasts dict từ Phase 5.")
 
 residual_conclusions = {}
 
@@ -72,4 +72,4 @@ print("=" * 60)
 
 residual_diagnostic_conclusion = residual_conclusions.get(best_model, "N/A")
 
-print("\n✅ Phase 7 hoàn tất — Residual diagnostics đã xong.")
+print("\n✅ Phase 6 hoàn tất — Residual diagnostics đã xong.")

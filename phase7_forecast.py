@@ -8,7 +8,7 @@ target_unit = globals().get("TARGET_UNIT", "mm/tháng")
 target_axis_label = f"{target_label} ({target_unit})"
 
 if "forecast_model_name" not in globals():
-    raise NameError("Phase 8 cần chạy sau Phase 6 để có forecast_model_name.")
+    raise NameError("Phase 7 cần chạy sau Phase 5 để có forecast_model_name.")
 
 full_series = df_monthly["Rainfall"].asfreq("MS")
 future_index = pd.date_range(
@@ -299,4 +299,4 @@ print(f"Giai đoạn dự báo      : {future_index[0]:%m/%Y} → {future_index[
 print(f"Tổng mưa dự báo       : {forecast_period_sum:.1f} mm")
 print("=" * 70)
 
-print("\n✅ Phase 8 hoàn tất — forecast đã sẵn sàng.")
+print("\n✅ Phase 7 hoàn tất — forecast đã sẵn sàng.")
