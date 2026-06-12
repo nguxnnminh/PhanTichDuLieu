@@ -1,16 +1,52 @@
 {
   "source": "Open-Meteo Historical Weather API",
   "city": "Ho Chi Minh City",
-  "latitude": 10.8231,
-  "longitude": 106.6297,
+  "spatial_method": "mean of 7 representative coordinates",
+  "coordinates": [
+    {
+      "name": "Center_Q1Q3",
+      "lat": 10.7769,
+      "lon": 106.7009
+    },
+    {
+      "name": "NorthWest_CuChi",
+      "lat": 11.05,
+      "lon": 106.5
+    },
+    {
+      "name": "NorthEast_ThuDuc",
+      "lat": 10.85,
+      "lon": 106.77
+    },
+    {
+      "name": "West_BinhChanh",
+      "lat": 10.7,
+      "lon": 106.55
+    },
+    {
+      "name": "South_NhaBe",
+      "lat": 10.55,
+      "lon": 106.73
+    },
+    {
+      "name": "East_Q9",
+      "lat": 10.84,
+      "lon": 106.83
+    },
+    {
+      "name": "Mid_TanBinh",
+      "lat": 10.8,
+      "lon": 106.65
+    }
+  ],
   "timezone": "Asia/Ho_Chi_Minh",
   "start_date": "1979-01-01",
   "end_date": "2026-05-31",
   "daily_rows": 17318,
-  "hourly_rows": 415632,
   "monthly_rows": 569,
-  "target": "monthly total rainfall",
+  "target": "monthly total of spatially-averaged daily rainfall",
   "target_unit": "mm/thang",
+  "target_definition": "Each day: spatial mean of rain_sum across 7 HCMC coordinates. Each month: sum of daily spatial means = average monthly rainfall (mm/month).",
   "api_url_template": "https://archive-api.open-meteo.com/v1/archive",
   "daily_variables": [
     "rain_sum",
@@ -36,9 +72,5 @@
     "cloud_cover_high",
     "wind_speed_10m",
     "wind_gusts_10m"
-  ],
-  "chunked_by": "year",
-  "cache_dir": "openmeteo_cache",
-  "first_chunk_url": "https://archive-api.open-meteo.com/v1/archive?latitude=10.8231&longitude=106.6297&start_date=1979-01-01&end_date=1979-12-31&daily=rain_sum%2Cprecipitation_sum%2Cprecipitation_hours%2Ctemperature_2m_mean%2Ctemperature_2m_min%2Ctemperature_2m_max%2Capparent_temperature_mean%2Cwind_speed_10m_max%2Cwind_gusts_10m_max%2Cshortwave_radiation_sum%2Cet0_fao_evapotranspiration&hourly=relative_humidity_2m%2Cdew_point_2m%2Cpressure_msl%2Csurface_pressure%2Ccloud_cover%2Ccloud_cover_low%2Ccloud_cover_mid%2Ccloud_cover_high%2Cwind_speed_10m%2Cwind_gusts_10m&timezone=Asia%2FHo_Chi_Minh",
-  "last_chunk_url": "https://archive-api.open-meteo.com/v1/archive?latitude=10.8231&longitude=106.6297&start_date=2026-01-01&end_date=2026-05-31&daily=rain_sum%2Cprecipitation_sum%2Cprecipitation_hours%2Ctemperature_2m_mean%2Ctemperature_2m_min%2Ctemperature_2m_max%2Capparent_temperature_mean%2Cwind_speed_10m_max%2Cwind_gusts_10m_max%2Cshortwave_radiation_sum%2Cet0_fao_evapotranspiration&hourly=relative_humidity_2m%2Cdew_point_2m%2Cpressure_msl%2Csurface_pressure%2Ccloud_cover%2Ccloud_cover_low%2Ccloud_cover_mid%2Ccloud_cover_high%2Cwind_speed_10m%2Cwind_gusts_10m&timezone=Asia%2FHo_Chi_Minh"
+  ]
 }

@@ -1,4 +1,4 @@
-"""Runner: chạy toàn bộ pipeline Phase 1-9 trong cùng namespace."""
+"""Runner: chạy toàn bộ pipeline Phase 1–9 trong cùng namespace."""
 import sys
 import io
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
@@ -27,11 +27,10 @@ phases = [
     "d:/Python/phase2_eda.py",
     "d:/Python/phase3_feature_engineering.py",
     "d:/Python/phase4_modeling.py",
-    "d:/Python/phase5_feature_selection.py",
-    "d:/Python/phase6_evaluation.py",
-    "d:/Python/phase7_residual_diagnostics.py",
-    "d:/Python/phase8_forecast.py",
-    "d:/Python/phase9_report_conclusions.py",
+    "d:/Python/phase5_evaluation.py",
+    "d:/Python/phase6_residual_diagnostics.py",
+    "d:/Python/phase7_forecast.py",
+    "d:/Python/phase8_report_conclusions.py",
 ]
 
 for phase_file in phases:

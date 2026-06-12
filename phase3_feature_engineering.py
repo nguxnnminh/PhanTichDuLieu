@@ -1,13 +1,13 @@
 # Phase 3: Feature Engineering cho Machine Learning
-# cho cac mo hinh Scikit-Learn, dong thoi tranh data leakage.
-# Nguyen tac chong leakage:
-# - Lag/rolling cua Rainfall chi dung du lieu qua khu.
-# - Rolling features bat buoc dung shift(1).rolling(...).
-# - Bien khi tuong khong dung gia tri cung thang lam feature forecast.
-# - Chi tao weather lag/rolling features tu qua khu.
+# ─────────────────────────────────────────────────────────────
+# Nguyên tắc chống leakage:
+# - Lag/rolling của Rainfall chỉ dùng dữ liệu quá khứ.
+# - Rolling features bắt buộc dùng shift(1).rolling(...).
+# - Biến khí tượng không dùng giá trị cùng tháng làm feature forecast.
+# - Chỉ tạo weather lag/rolling features từ quá khứ.
 
 print("=" * 70)
-print("PHASE 3 - FEATURE ENGINEERING")
+print("PHASE 3 — FEATURE ENGINEERING")
 print("=" * 70)
 
 
@@ -49,12 +49,14 @@ def build_ml_features(df_monthly: pd.DataFrame):
         "weather_rolling": [],
     }
 
+    # ── Time / calendar features ──
     df["month"] = df.index.month
     df["quarter"] = df.index.quarter
     df["month_sin"] = np.sin(2 * np.pi * df["month"] / 12)
     df["month_cos"] = np.cos(2 * np.pi * df["month"] / 12)
     feature_groups["time"].extend(["month", "quarter", "month_sin", "month_cos"])
 
+    # ── Fourier features ──
     for k in [1, 2, 3]:
         sin_col = f"fourier_sin_{k}"
         cos_col = f"fourier_cos_{k}"
@@ -62,12 +64,13 @@ def build_ml_features(df_monthly: pd.DataFrame):
         df[cos_col] = np.cos(2 * np.pi * k * df.index.month / 12)
         feature_groups["fourier"].extend([sin_col, cos_col])
 
+    # ── Rainfall lag features ──
     for lag in [1, 2, 3, 6, 12, 24, 36]:
         col = f"rain_lag_{lag}"
         df[col] = y.shift(lag)
         feature_groups["rainfall_lag"].append(col)
 
-    # Rainfall rolling features, shifted to avoid current-month leakage
+    # ── Rainfall rolling features (shift(1) to prevent leakage) ──
     for window in [3, 6, 12, 24]:
         mean_col = f"rain_roll_mean_{window}"
         std_col = f"rain_roll_std_{window}"
@@ -75,7 +78,7 @@ def build_ml_features(df_monthly: pd.DataFrame):
         df[std_col] = y.shift(1).rolling(window).std()
         feature_groups["rainfall_rolling"].extend([mean_col, std_col])
 
-    # Weather lag/rolling features
+    # ── Weather lag/rolling features ──
     available_weather_cols = [c for c in WEATHER_BASE_COLS if c in df.columns]
     for col in available_weather_cols:
         lag1 = f"{col}_lag1"
@@ -89,6 +92,7 @@ def build_ml_features(df_monthly: pd.DataFrame):
         feature_groups["weather_lag"].extend([lag1, lag3])
         feature_groups["weather_rolling"].extend([roll3, roll12])
 
+    # ── Assemble ──
     feature_df = df.dropna().copy()
     y_ml = feature_df["Rainfall"].copy()
 
@@ -110,17 +114,19 @@ def build_ml_features(df_monthly: pd.DataFrame):
 X_ml, y_ml, feature_df, feature_groups = build_ml_features(df_monthly)
 
 print(f"Shape X_ml                    : {X_ml.shape}")
-print(f"So dong sau khi drop NaN       : {len(feature_df)}")
-print(f"Thoi gian supervised dataset   : {feature_df.index.min():%m/%Y} -> {feature_df.index.max():%m/%Y}")
-print("\nSo feature theo nhom:")
+print(f"Số dòng sau khi drop NaN       : {len(feature_df)}")
+print(
+    f"Thời gian supervised dataset   : "
+    f"{feature_df.index.min():%m/%Y} → {feature_df.index.max():%m/%Y}"
+)
+print("\nSố feature theo nhóm:")
 for group_name, cols in feature_groups.items():
     print(f"  {group_name:<18}: {len(cols)}")
 
-print("\nGhi chu leakage:")
-print("- Weather features chi dung lag/rolling qua khu, khong dung gia tri khi tuong cung thang.")
-print("- Rolling features dung shift(1).rolling(...) de khong nhin vao thang dang du bao.")
-print("- Feature selection o Phase 5 phuc vu giai thich/bao cao, khong dung de tuyet doi hoa CV.")
+print("\nGhi chú leakage:")
+print("- Weather features chỉ dùng lag/rolling quá khứ, không dùng giá trị cùng tháng.")
+print("- Rolling features dùng shift(1).rolling(...) để không nhìn vào tháng đang dự báo.")
 
 print("=" * 70)
-print("✅ Phase 3 hoan tat - X_ml, y_ml, feature_df, feature_groups da san sang.")
+print("✅ Phase 3 hoàn tất — X_ml, y_ml, feature_df, feature_groups đã sẵn sàng.")
 print("=" * 70)

@@ -1,5 +1,7 @@
 # Phase 1: Tải dữ liệu & Tiền xử lý
-
+# ─────────────────────────────────────────────────────────────────
+# Đọc dữ liệu monthly đã được tổng hợp từ 7 tọa độ đại diện TP.HCM.
+# Kiểm tra chất lượng, impute nếu cần, chuẩn bị df_monthly cho pipeline.
 
 import os
 import warnings
@@ -7,102 +9,35 @@ import warnings
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-
-try:
-    import seaborn as sns
-except ImportError:
-    class _SeabornFallback:
-        @staticmethod
-        def boxplot(data, x, y, order=None, palette=None, linewidth=1.2,
-                    flierprops=None, ax=None, **kwargs):
-            ax = ax or plt.gca()
-            if order is None:
-                order = list(pd.unique(data[x]))
-            groups = [
-                pd.to_numeric(data.loc[data[x] == label, y], errors="coerce")
-                .dropna()
-                .values
-                for label in order
-            ]
-            bp = ax.boxplot(
-                groups,
-                labels=order,
-                patch_artist=True,
-                flierprops=flierprops
-            )
-            for patch in bp.get("boxes", []):
-                patch.set_facecolor("#9ecae1")
-                patch.set_alpha(0.85)
-                patch.set_linewidth(linewidth)
-            return ax
-
-        @staticmethod
-        def heatmap(data, cmap="viridis", annot=False, fmt=".2g",
-                    linewidths=0.0, linecolor="white", cbar_kws=None,
-                    ax=None, **kwargs):
-            ax = ax or plt.gca()
-            arr = data.astype(float).values
-            im = ax.imshow(arr, aspect="auto", cmap=cmap)
-            ax.set_xticks(np.arange(data.shape[1]))
-            ax.set_xticklabels(list(data.columns))
-            ax.set_yticks(np.arange(data.shape[0]))
-            ax.set_yticklabels(list(data.index))
-
-            if annot:
-                for i in range(data.shape[0]):
-                    for j in range(data.shape[1]):
-                        val = arr[i, j]
-                        text = "" if np.isnan(val) else format(val, fmt)
-                        ax.text(j, i, text, ha="center", va="center",
-                                fontsize=7, color="black")
-
-            if linewidths:
-                ax.set_xticks(np.arange(-0.5, data.shape[1], 1), minor=True)
-                ax.set_yticks(np.arange(-0.5, data.shape[0], 1), minor=True)
-                ax.grid(which="minor", color=linecolor, linestyle="-",
-                        linewidth=linewidths)
-                ax.tick_params(which="minor", bottom=False, left=False)
-
-            cbar = plt.colorbar(im, ax=ax)
-            if cbar_kws and "label" in cbar_kws:
-                cbar.set_label(cbar_kws["label"])
-            return ax
-
-    sns = _SeabornFallback()
-    print("[Lưu ý] Chưa cài seaborn; dùng fallback Matplotlib cho boxplot/heatmap.")
-
-from statsmodels.tsa.statespace.sarimax import SARIMAX
-from statsmodels.tsa.holtwinters import ExponentialSmoothing
-from statsmodels.tsa.seasonal import seasonal_decompose
-
-from pmdarima import auto_arima
-
-from sklearn.metrics import mean_absolute_error, mean_squared_error
-from sklearn.ensemble import GradientBoostingRegressor
+import seaborn as sns
 
 warnings.filterwarnings("ignore")
+
+# ── Constants ──────────────────────────────────────────────────
+OPENMETEO_MONTHLY_PATH = "hcmc_openmeteo_monthly.csv"
+city_name = "TP. Hồ Chí Minh"
+
+PROJECT_TITLE = (
+    "Phân tích và dự báo lượng mưa trung bình "
+    "của Thành phố Hồ Chí Minh dựa trên dữ liệu khí tượng"
+)
+TARGET_AGG = "monthly_total"
+TARGET_LABEL = "Lượng mưa trung bình tháng"
+TARGET_UNIT = "mm/tháng"
+TARGET_DEFINITION = (
+    "Mỗi ngày: trung bình không gian rain_sum từ 7 tọa độ đại diện TP.HCM. "
+    "Mỗi tháng: tổng các giá trị trung bình ngày → lượng mưa trung bình tháng (mm/tháng). "
+    "Các mô hình dự báo giá trị này cho từng tháng tương lai."
+)
+
+PRORATE_THRESHOLD = 0.80
 
 VERBOSE_PHASE1 = False
 
 print("✅ Tất cả thư viện đã được import thành công.")
 
 
-DATA_SOURCE = "openmeteo_hcmc"
-city_name = "Ho Chi Minh City"
-OPENMETEO_MONTHLY_PATH = "hcmc_openmeteo_monthly.csv"
-PROJECT_TITLE = "Phân tích và Dự báo lượng mưa trung bình của một thành phố dựa trên dữ liệu khí tượng"
-
-TARGET_AGG = "monthly_total"
-TARGET_LABEL = "Lượng mưa trung bình tháng"
-TARGET_UNIT = "mm/tháng"
-TARGET_DEFINITION = (
-    "Rainfall được tổng hợp theo tháng từ dữ liệu ngày và biểu diễn bằng mm/tháng; "
-    "các mô hình dự báo giá trị mưa đại diện cho từng tháng tương lai."
-)
-
-PRORATE_THRESHOLD = 0.80  # >= 80% ValidDays → "Gần đủ"
-
-
+# ── Quality classification ─────────────────────────────────────
 def classify_month(row):
     v, e = row["ValidDays"], row["ExpectedDays"]
     if v == e:
@@ -118,12 +53,14 @@ def classify_month(row):
 def impute_monthly_rainfall(df_monthly: pd.DataFrame) -> pd.DataFrame:
     df_monthly = df_monthly.copy()
 
-    # Open-Meteo có thể tải đến giữa tháng hiện tại, nên loại tháng cuối nếu chưa đủ.
+    # Loại tháng cuối nếu chưa đủ dữ liệu
     last_idx = df_monthly.index[-1]
     last_quality = df_monthly.loc[last_idx, "Quality"]
     if last_quality != "Du":
-        print(f"\n[Loại] Tháng cuối {last_idx.strftime('%m/%Y')} ({last_quality})"
-              f" → bị loại khỏi chuỗi.")
+        print(
+            f"\n[Loại] Tháng cuối {last_idx.strftime('%m/%Y')} ({last_quality})"
+            f" → bị loại khỏi chuỗi."
+        )
         df_monthly = df_monthly.iloc[:-1]
 
     df_monthly["WasImputed"] = False
@@ -138,10 +75,8 @@ def impute_monthly_rainfall(df_monthly: pd.DataFrame) -> pd.DataFrame:
 
     for idx, row in df_monthly.iterrows():
         q = row["Quality"]
-
         if q == "Du":
             continue
-
         if q == "Gan du":
             if row["ValidDays"] > 0:
                 df_monthly.loc[idx, "Rainfall"] = (
@@ -163,10 +98,11 @@ def impute_monthly_rainfall(df_monthly: pd.DataFrame) -> pd.DataFrame:
     return df_monthly
 
 
+# ── Load data ──────────────────────────────────────────────────
 if not os.path.exists(OPENMETEO_MONTHLY_PATH):
     raise FileNotFoundError(
         f"Không tìm thấy {OPENMETEO_MONTHLY_PATH}. "
-        f"Hãy chạy download_openmeteo_hcmc.py trước để tải dữ liệu TP.HCM Open-Meteo."
+        f"Hãy chạy download_openmeteo_hcmc.py trước."
     )
 
 print(f"📄 Đang đọc dataset: {OPENMETEO_MONTHLY_PATH}")
@@ -181,8 +117,10 @@ print("=" * 55)
 print(f"TỔNG QUAN BỘ DỮ LIỆU OPEN-METEO — {city_name.upper()}")
 print("=" * 55)
 print(f"Kích thước        : {df.shape[0]:,} tháng × {df.shape[1]} cột")
-print(f"Khoảng thời gian  : {df.index.min().strftime('%m/%Y')} → "
-      f"{df.index.max().strftime('%m/%Y')}")
+print(
+    f"Khoảng thời gian  : {df.index.min().strftime('%m/%Y')} → "
+    f"{df.index.max().strftime('%m/%Y')}"
+)
 if VERBOSE_PHASE1:
     print(f"\nKiểu dữ liệu các cột :\n{df.dtypes.to_string()}")
     print(f"\n5 dòng đầu tiên  :\n{df.head().to_string()}")
@@ -194,13 +132,16 @@ if "ExpectedDays" not in df_monthly.columns:
 if "RainfallDays" in df_monthly.columns:
     df_monthly["ValidDays"] = df_monthly["RainfallDays"].fillna(0).astype(int)
 else:
-    df_monthly["ValidDays"] = df_monthly["Rainfall"].notna().astype(int) * df_monthly["ExpectedDays"]
+    df_monthly["ValidDays"] = (
+        df_monthly["Rainfall"].notna().astype(int) * df_monthly["ExpectedDays"]
+    )
 
 df_monthly["RowDays"] = df_monthly["ValidDays"]
 df_monthly["MissingRainValues"] = df_monthly["ExpectedDays"] - df_monthly["ValidDays"]
 df_monthly["MissingRows"] = df_monthly["ExpectedDays"] - df_monthly["RowDays"]
 df_monthly["Quality"] = df_monthly.apply(classify_month, axis=1)
 
+# Biến khí tượng context
 meteo_exclude = {
     "Rainfall", "Precipitation", "RainfallDays", "ExpectedDays", "Completeness",
     "RowDays", "ValidDays", "MissingRainValues", "MissingRows", "Quality",
@@ -211,7 +152,7 @@ available_meteo_cols = [
 ]
 df_meteo_monthly_context = df_monthly[available_meteo_cols].copy()
 
-
+# ── Quality report ─────────────────────────────────────────────
 print("=" * 60)
 print("KIỂM TRA CHẤT LƯỢNG THÁNG")
 print("=" * 60)
@@ -226,35 +167,21 @@ for label in ["Trong hoan toan", "Thieu nhieu", "Gan du"]:
     if len(subset) > 0:
         print(f"\nChi tiết — {label} ({len(subset)} tháng):")
         for idx, row in subset.iterrows():
-            print(f"  {idx.strftime('%m/%Y')}  ValidDays={int(row['ValidDays'])}"
-                  f"  RowDays={int(row['RowDays'])}"
-                  f"  ExpectedDays={int(row['ExpectedDays'])}"
-                  f"  NaN trong ngày={int(row['MissingRainValues'])}")
+            print(
+                f"  {idx.strftime('%m/%Y')}  ValidDays={int(row['ValidDays'])}"
+                f"  ExpectedDays={int(row['ExpectedDays'])}"
+                f"  NaN={int(row['MissingRainValues'])}"
+            )
 
 df_monthly = impute_monthly_rainfall(df_monthly)
 df_meteo_monthly_context = df_meteo_monthly_context.reindex(df_monthly.index)
 
-print("\n" + "=" * 55)
-print("DỮ LIỆU SAU KHI RESAMPLE & IMPUTE THEO THÁNG")
-print("=" * 55)
-if VERBOSE_PHASE1:
-    print(f"\n10 tháng đầu :\n{df_monthly[['Rainfall','Quality','WasImputed','ImputeMethod']].head(10).to_string()}")
-    print(f"\n10 tháng cuối :\n{df_monthly[['Rainfall','Quality','WasImputed','ImputeMethod']].tail(10).to_string()}")
-print(f"\nTổng số tháng hiện có : {len(df_monthly)}")
-
-
+# ── Calendar columns ───────────────────────────────────────────
 df_monthly["Year"] = df_monthly.index.year.astype(int)
 df_monthly["Month"] = df_monthly.index.month.astype(int)
 df_monthly["Quarter"] = df_monthly.index.quarter.astype(int)
 
-print("=" * 55)
-print("df_monthly SAU XỬ LÝ (5 dòng đầu)")
-print("=" * 55)
-if VERBOSE_PHASE1:
-    print(df_monthly.head().to_string())
-print(f"Kích thước df_monthly : {df_monthly.shape}")
-
-
+# ── Summary ────────────────────────────────────────────────────
 n_du = (df_monthly["Quality"] == "Du").sum()
 n_gan_du = (df_monthly["Quality"] == "Gan du").sum()
 n_thieu_nhieu = (df_monthly["Quality"] == "Thieu nhieu").sum()
@@ -267,35 +194,25 @@ print("\n" + "=" * 55)
 print("PHASE 1 — BÁO CÁO TÓM TẮT")
 print("=" * 55)
 print(f"Đề tài                          : {PROJECT_TITLE}")
-print(f"Nguồn dữ liệu                   : {DATA_SOURCE}")
-print(f"Thành phố được chọn             : {city_name}")
-print(f"Khoảng thời gian                : {df_monthly.index.min().strftime('%m/%Y')} → "
-      f"{df_monthly.index.max().strftime('%m/%Y')}")
+print(f"Thành phố                       : {city_name}")
+print(
+    f"Khoảng thời gian                : {df_monthly.index.min().strftime('%m/%Y')} → "
+    f"{df_monthly.index.max().strftime('%m/%Y')}"
+)
 print(f"Tổng số tháng dữ liệu           : {len(df_monthly)} tháng")
 print(f"Biến mục tiêu                   : {TARGET_LABEL} ({TARGET_UNIT})")
-print(f"Định nghĩa biến mục tiêu        : {TARGET_DEFINITION}")
+print(f"Định nghĩa target               : {TARGET_DEFINITION}")
 print(f"Lượng mưa tháng thấp nhất       : {df_monthly['Rainfall'].min():.1f} {TARGET_UNIT}")
 print(f"Lượng mưa tháng cao nhất        : {df_monthly['Rainfall'].max():.1f} {TARGET_UNIT}")
 print(f"Lượng mưa tháng trung bình      : {df_monthly['Rainfall'].mean():.1f} {TARGET_UNIT}")
 print(f"Số tháng mưa bằng 0             : {zero_rain} tháng")
-print(f"Biến khí tượng bối cảnh         : {len(available_meteo_cols)} biến, lưu ở df_meteo_monthly_context")
+print(f"Biến khí tượng bối cảnh         : {len(available_meteo_cols)} biến")
 print("-" * 55)
 print(f"Số tháng 'Đủ'                   : {n_du}")
 print(f"Số tháng 'Gần đủ' (prorate)     : {n_gan_du}")
 print(f"Số tháng 'Thiếu nhiều' (median) : {n_thieu_nhieu}")
 print(f"Số tháng 'Trống hoàn toàn'      : {n_trong}")
-print(f"Tỷ lệ tháng đã impute           : {pct_imputed:.1f}%  ({n_imputed}/{len(df_monthly)})")
-if n_imputed == 0 and df_monthly["Rainfall"].isna().sum() == 0:
-    print("Trạng thái dữ liệu               : Không missing Rainfall, không cần impute")
+print(f"Tỷ lệ tháng đã impute           : {pct_imputed:.1f}% ({n_imputed}/{len(df_monthly)})")
 print("=" * 55)
-
-print("\n" + "=" * 60)
-print("KẾT LUẬN PHASE 1")
-print("=" * 60)
-print("Dữ liệu được chuẩn hóa theo tháng, kiểm tra chất lượng và xác nhận không có tháng")
-print("thiếu dữ liệu; không cần thực hiện imputation.")
-print(f"Kết quả: chuỗi {len(df_monthly)} tháng sạch ({df_monthly.index[0]:%m/%Y}–"
-      f"{df_monthly.index[-1]:%m/%Y}), kèm {len(available_meteo_cols)} biến khí tượng bối cảnh.")
-print("=" * 60)
 
 print("\n✅ Phase 1 hoàn tất — df_monthly đã sẵn sàng.")

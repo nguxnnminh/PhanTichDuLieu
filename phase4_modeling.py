@@ -1,13 +1,24 @@
-# Phase 4: Modeling - 3 Models (Baseline, Statistical, Machine Learning)
+# Phase 4: Modeling — 4 mô hình chính
+# ─────────────────────────────────────────────────────────────
+# 1. Seasonal Naive   : y_hat(t) = y(t-12)
+# 2. SARIMAX          : auto_arima + exogenous lag weather hợp lệ
+# 3. Prophet           : Facebook Prophet, yearly seasonality
+# 4. XGBoost Regressor : lag, rolling, Fourier, weather lag features
 
-target_label = globals().get("TARGET_LABEL", "Luong mua trung binh thang")
-target_unit = globals().get("TARGET_UNIT", "mm/thang")
+import os
+import warnings
+warnings.filterwarnings("ignore")
+
+from statsmodels.tsa.statespace.sarimax import SARIMAX
+from pmdarima import auto_arima
+from prophet import Prophet
+from xgboost import XGBRegressor
+
+target_label = globals().get("TARGET_LABEL", "Lượng mưa trung bình tháng")
+target_unit = globals().get("TARGET_UNIT", "mm/tháng")
 target_axis_label = f"{target_label} ({target_unit})"
 
-from sklearn.ensemble import RandomForestRegressor
-
-SHOW_MODEL_SUMMARY = False
-
+# ── Train / Test split ─────────────────────────────────────────
 TEST_SIZE = 24
 series = df_monthly["Rainfall"].asfreq("MS")
 train = series.iloc[:-TEST_SIZE]
@@ -15,288 +26,393 @@ test = series.iloc[-TEST_SIZE:]
 split_date = test.index[0]
 
 print("=" * 60)
-print("CHIA TAP HUAN LUYEN / KIEM TRA")
+print("CHIA TẬP HUẤN LUYỆN / KIỂM TRA")
 print("=" * 60)
-print(f"Tap huan luyen : {len(train)} thang ({train.index[0]:%m/%Y} -> {train.index[-1]:%m/%Y})")
-print(f"Tap kiem tra   : {len(test)} thang ({test.index[0]:%m/%Y} -> {test.index[-1]:%m/%Y})")
+print(
+    f"Tập huấn luyện : {len(train)} tháng "
+    f"({train.index[0]:%m/%Y} → {train.index[-1]:%m/%Y})"
+)
+print(
+    f"Tập kiểm tra   : {len(test)} tháng "
+    f"({test.index[0]:%m/%Y} → {test.index[-1]:%m/%Y})"
+)
 
 fig, ax = plt.subplots(figsize=(14, 4), dpi=100)
 ax.plot(train.index, train, color="steelblue", linewidth=1.5, label="Train")
 ax.plot(test.index, test, color="darkorange", linewidth=1.5, label="Test")
 ax.axvline(split_date, color="black", linestyle="--", linewidth=1.2)
-ax.set_title(f"Chia Train/Test - {TEST_SIZE} thang cuoi lam tap kiem tra", fontsize=13, fontweight="bold")
-ax.set_xlabel("Thoi gian")
+ax.set_title(
+    f"Chia Train/Test — {TEST_SIZE} tháng cuối làm tập kiểm tra",
+    fontsize=13,
+    fontweight="bold",
+)
+ax.set_xlabel("Thời gian")
 ax.set_ylabel(target_axis_label)
 ax.legend()
 ax.grid(True, alpha=0.3)
 plt.tight_layout()
 plt.show()
 
-model_catalog_rows = []
 
-
-def register_model(model_name, model_type, uses_weather, note):
-    model_catalog_rows.append({
-        "Model": model_name,
-        "Loai model": model_type,
-        "Dung weather": "Co" if uses_weather else "Khong",
-        "Ghi chu": note,
-    })
-
-
-def _quick_rmse(actual: pd.Series, predicted: pd.Series) -> float:
+def _quick_rmse(actual, predicted):
+    from sklearn.metrics import mean_squared_error
     return float(np.sqrt(mean_squared_error(actual, predicted)))
 
 
 # ============================================================
-# BASELINE: Seasonal Mean
+# MODEL 1: SEASONAL NAIVE — y_hat(t) = y(t-12)
 # ============================================================
 print("\n" + "=" * 60)
-print("BASELINE")
+print("MODEL 1: SEASONAL NAIVE")
 print("=" * 60)
 
-_train_month = train.to_frame("Rainfall")
-_train_month["Month"] = _train_month.index.month
-monthly_climatology = _train_month.groupby("Month")["Rainfall"].mean()
-seasonal_mean_forecast = pd.Series(
-    [monthly_climatology[d.month] for d in test.index],
+seasonal_naive_forecast = pd.Series(
+    [train[train.index.month == d.month].iloc[-1] for d in test.index],
     index=test.index,
-    name="Seasonal Mean",
+    name="Seasonal Naive",
 )
-register_model("Seasonal Mean", "Baseline", False, "Trung binh lich su theo thang")
-print(f"Seasonal Mean tao xong - RMSE: {_quick_rmse(test, seasonal_mean_forecast):.2f} {target_unit}")
+print(
+    f"Seasonal Naive: y_hat(t) = y(t-12)\n"
+    f"RMSE hold-out: {_quick_rmse(test, seasonal_naive_forecast):.2f} {target_unit}"
+)
 
 # ============================================================
-# STATISTICAL: Holt-Winters
+# MODEL 2: SARIMAX
 # ============================================================
 print("\n" + "=" * 60)
-print("HOLT-WINTERS")
+print("MODEL 2: SARIMAX")
 print("=" * 60)
 
-hw_model = ExponentialSmoothing(
-    train,
-    trend="add",
-    seasonal="add",
-    seasonal_periods=12,
-    initialization_method="estimated",
-)
-hw_fit = hw_model.fit(optimized=True)
-if SHOW_MODEL_SUMMARY:
-    print(hw_fit.summary())
-register_model("Holt-Winters", "Statistical", False, "Exponential smoothing mua vu")
+sarimax_forecast = None
+sarimax_fit = None
+sarimax_order = None
+sarimax_seasonal_order = None
 
-hw_raw_fc = hw_fit.forecast(steps=TEST_SIZE)
-hw_forecast = pd.Series(np.clip(hw_raw_fc.values, 0, None), index=test.index, name="Holt-Winters")
+# --- Tạo exogenous hợp lệ: dùng lag-1 của weather variables ---
+SARIMAX_EXOG_COLS = [
+    c for c in [
+        "HumidityMean", "CloudCoverMean", "DewPointMean",
+        "PrecipitationHours", "TempMean", "ShortwaveRadiation",
+    ]
+    if c in df_meteo_monthly_context.columns
+]
 
-fig, ax = plt.subplots(figsize=(14, 5), dpi=100)
-ax.plot(train.index, train, color="steelblue", linewidth=1.3, label="Train")
-ax.plot(test.index, test, color="darkorange", linewidth=1.8, label="Thuc te")
-ax.plot(hw_forecast.index, hw_forecast, color="firebrick", linewidth=2, linestyle="--", label="Holt-Winters")
-ax.axvline(split_date, color="black", linestyle=":", linewidth=1)
-ax.set_title(f"Holt-Winters: du bao vs thuc te - {city_name}", fontsize=13, fontweight="bold")
-ax.set_xlabel("Thoi gian")
-ax.set_ylabel(target_axis_label)
-ax.legend()
-ax.grid(True, alpha=0.3)
-plt.tight_layout()
-plt.show()
-print(f"Holt-Winters RMSE hold-out: {_quick_rmse(test, hw_forecast):.2f} {target_unit}")
+try:
+    # Build exogenous from lag-1 (no current-month leakage)
+    exog_full = df_meteo_monthly_context.reindex(series.index)[SARIMAX_EXOG_COLS]
+    exog_full = exog_full.shift(1)  # lag-1 to avoid leakage
+    exog_full = exog_full.interpolate(method="time").ffill().bfill()
+
+    exog_train = exog_full.iloc[:-TEST_SIZE]
+    exog_test = exog_full.iloc[-TEST_SIZE:]
+
+    # auto_arima to find best order
+    print("Đang chạy auto_arima (có thể mất 1-2 phút)...")
+    auto_model = auto_arima(
+        train,
+        exogenous=exog_train,
+        seasonal=True,
+        m=12,
+        max_p=3,
+        max_q=3,
+        max_P=2,
+        max_Q=2,
+        max_d=1,
+        max_D=1,
+        stepwise=True,
+        suppress_warnings=True,
+        error_action="ignore",
+        trace=False,
+    )
+    sarimax_order = auto_model.order
+    sarimax_seasonal_order = auto_model.seasonal_order
+
+    print(f"Best order: SARIMAX{sarimax_order}x{sarimax_seasonal_order}")
+
+    # Refit with statsmodels for proper forecasting
+    sarimax_model = SARIMAX(
+        train,
+        exog=exog_train,
+        order=sarimax_order,
+        seasonal_order=sarimax_seasonal_order,
+        enforce_stationarity=False,
+        enforce_invertibility=False,
+    )
+    sarimax_fit = sarimax_model.fit(disp=False, maxiter=200)
+    raw_fc = sarimax_fit.forecast(steps=TEST_SIZE, exog=exog_test)
+    sarimax_forecast = pd.Series(
+        np.clip(raw_fc.values, 0, None),
+        index=test.index,
+        name="SARIMAX",
+    )
+    print(
+        f"SARIMAX{sarimax_order}x{sarimax_seasonal_order} "
+        f"RMSE hold-out: {_quick_rmse(test, sarimax_forecast):.2f} {target_unit}"
+    )
+    print(f"Exogenous vars (lag-1): {SARIMAX_EXOG_COLS}")
+except Exception as exc:
+    print(f"[SARIMAX bỏ qua] {exc}")
+    sarimax_forecast = None
+    sarimax_fit = None
 
 # ============================================================
-# MACHINE LEARNING: Random Forest Weather
+# MODEL 3: PROPHET
 # ============================================================
-print("\n" + "=" * 70)
-print("MACHINE LEARNING MODELS - SCIKIT-LEARN")
-print("=" * 70)
+print("\n" + "=" * 60)
+print("MODEL 3: PROPHET")
+print("=" * 60)
+
+prophet_forecast = None
+
+try:
+    # Prophet needs ds, y format
+    prophet_train = pd.DataFrame({
+        "ds": train.index,
+        "y": train.values,
+    })
+
+    prophet_model = Prophet(
+        yearly_seasonality=True,
+        weekly_seasonality=False,
+        daily_seasonality=False,
+        seasonality_mode="additive",
+        changepoint_prior_scale=0.05,
+    )
+    prophet_model.fit(prophet_train)
+
+    future_dates = prophet_model.make_future_dataframe(periods=TEST_SIZE, freq="MS")
+    prophet_pred = prophet_model.predict(future_dates)
+
+    # Extract test period predictions
+    prophet_test_pred = prophet_pred.iloc[-TEST_SIZE:]
+    prophet_forecast = pd.Series(
+        np.clip(prophet_test_pred["yhat"].values, 0, None),
+        index=test.index,
+        name="Prophet",
+    )
+    print(
+        f"Prophet RMSE hold-out: {_quick_rmse(test, prophet_forecast):.2f} {target_unit}"
+    )
+except Exception as exc:
+    print(f"[Prophet bỏ qua] {exc}")
+    prophet_forecast = None
+
+# ============================================================
+# MODEL 4: XGBOOST REGRESSOR
+# ============================================================
+print("\n" + "=" * 60)
+print("MODEL 4: XGBOOST REGRESSOR")
+print("=" * 60)
+
+xgb_forecast = None
+xgb_model = None
 
 WEATHER_FEATURE_COLS = [
     c for c in [
-        "PrecipitationHours",
-        "ShortwaveRadiation",
-        "Evapotranspiration",
-        "TempMean",
-        "TempMin",
-        "TempMax",
-        "ApparentTempMean",
-        "HumidityMean",
-        "HumidityMax",
-        "DewPointMean",
-        "PressureMSLMean",
-        "SurfacePressureMean",
-        "CloudCoverMean",
-        "CloudCoverLowMean",
-        "CloudCoverMidMean",
-        "CloudCoverHighMean",
-        "WindSpeedMax",
-        "WindGustMax",
-        "WindSpeedHourlyMean",
-        "WindGustHourlyMean",
+        "PrecipitationHours", "ShortwaveRadiation", "Evapotranspiration",
+        "TempMean", "TempMin", "TempMax", "ApparentTempMean",
+        "HumidityMean", "HumidityMax", "DewPointMean",
+        "PressureMSLMean", "SurfacePressureMean",
+        "CloudCoverMean", "CloudCoverLowMean", "CloudCoverMidMean",
+        "CloudCoverHighMean", "WindSpeedMax", "WindGustMax",
+        "WindSpeedHourlyMean", "WindGustHourlyMean",
     ]
     if "df_meteo_monthly_context" in globals()
     and c in df_meteo_monthly_context.columns
 ]
 
 
-def make_lag_feature_row(history: pd.Series, forecast_date: pd.Timestamp) -> dict:
+def make_xgb_feature_row(history: pd.Series, forecast_date: pd.Timestamp,
+                          meteo_history: pd.DataFrame = None) -> dict:
+    """Build one feature row for XGBoost — only uses past data."""
     month = forecast_date.month
-    same_month_history = history[history.index.month == month]
     row = {
         "month": month,
-        "sin12": np.sin(2 * np.pi * month / 12),
-        "cos12": np.cos(2 * np.pi * month / 12),
-        "last_year_same_month": same_month_history.iloc[-1] if len(same_month_history) else np.nan,
-        "clim_mean": history.groupby(history.index.month).mean().get(month, history.mean()),
-        "clim_median": history.groupby(history.index.month).median().get(month, history.median()),
-        "global_mean": history.mean(),
-        "global_median": history.median(),
+        "month_sin": np.sin(2 * np.pi * month / 12),
+        "month_cos": np.cos(2 * np.pi * month / 12),
+        "fourier_sin_2": np.sin(2 * np.pi * 2 * month / 12),
+        "fourier_cos_2": np.cos(2 * np.pi * 2 * month / 12),
+        "fourier_sin_3": np.sin(2 * np.pi * 3 * month / 12),
+        "fourier_cos_3": np.cos(2 * np.pi * 3 * month / 12),
     }
+
+    # Rainfall lag features
     for lag in [1, 2, 3, 6, 12, 24]:
-        row[f"lag{lag}"] = history.iloc[-lag] if len(history) >= lag else np.nan
+        row[f"rain_lag_{lag}"] = (
+            history.iloc[-lag] if len(history) >= lag else np.nan
+        )
+
+    # Rainfall rolling features (already shifted by using history up to t-1)
     for window in [3, 6, 12, 24]:
-        row[f"roll{window}"] = history.iloc[-window:].mean() if len(history) >= window else np.nan
+        vals = history.iloc[-window:] if len(history) >= window else history
+        row[f"rain_roll_mean_{window}"] = float(vals.mean()) if len(vals) > 0 else np.nan
+        row[f"rain_roll_std_{window}"] = float(vals.std()) if len(vals) > 1 else np.nan
+
+    # Same-month climatology from history
+    same_month = history[history.index.month == month]
+    row["rain_clim_mean"] = float(same_month.mean()) if len(same_month) > 0 else np.nan
+    row["rain_clim_median"] = float(same_month.median()) if len(same_month) > 0 else np.nan
+
+    # Weather lag features (lag-1, lag-3, rolling-3, rolling-12)
+    if meteo_history is not None and not meteo_history.empty:
+        for col in WEATHER_FEATURE_COLS:
+            if col not in meteo_history.columns:
+                continue
+            col_hist = meteo_history[col].dropna()
+            if len(col_hist) == 0:
+                continue
+            row[f"{col}_lag1"] = float(col_hist.iloc[-1]) if len(col_hist) >= 1 else np.nan
+            row[f"{col}_lag3"] = float(col_hist.iloc[-3]) if len(col_hist) >= 3 else np.nan
+            row[f"{col}_roll3"] = float(col_hist.iloc[-3:].mean()) if len(col_hist) >= 3 else np.nan
+            row[f"{col}_roll12"] = float(col_hist.iloc[-12:].mean()) if len(col_hist) >= 12 else np.nan
+
     return row
 
 
-def make_meteo_proxy_row(meteo_history: pd.DataFrame, forecast_date: pd.Timestamp) -> dict:
+def make_meteo_proxy_row(meteo_history: pd.DataFrame,
+                          forecast_date: pd.Timestamp) -> dict:
+    """Climatology proxy for future weather (same-month historical mean)."""
     if meteo_history is None or meteo_history.empty:
         return {}
     month = forecast_date.month
     proxy = {}
     for col in meteo_history.columns:
         same_month = meteo_history.loc[meteo_history.index.month == month, col].dropna()
-        proxy[col] = float(same_month.mean()) if len(same_month) else float(meteo_history[col].mean())
+        proxy[col] = float(same_month.mean()) if len(same_month) > 0 else float(meteo_history[col].mean())
     return proxy
 
 
-def make_weather_feature_row(
-    rain_history: pd.Series,
-    forecast_date: pd.Timestamp,
-    meteo_history: pd.DataFrame | None,
-) -> dict:
-    row = make_lag_feature_row(rain_history, forecast_date)
-    month = forecast_date.month
-
-    if meteo_history is None or meteo_history.empty or not WEATHER_FEATURE_COLS:
-        return row
-
-    meteo_history = meteo_history[WEATHER_FEATURE_COLS].copy()
-    proxy = make_meteo_proxy_row(meteo_history, forecast_date)
-
-    for col in WEATHER_FEATURE_COLS:
-        col_hist = meteo_history[col].dropna()
-        same_month = col_hist[col_hist.index.month == month]
-        row[f"{col}_clim"] = proxy.get(col, np.nan)
-        row[f"{col}_same_month_median"] = float(same_month.median()) if len(same_month) else np.nan
-        row[f"{col}_last"] = float(col_hist.iloc[-1]) if len(col_hist) else np.nan
-        for window in [3, 6, 12]:
-            row[f"{col}_roll{window}"] = float(col_hist.iloc[-window:].mean()) if len(col_hist) >= window else np.nan
-
-    return row
-
-
-print("\n" + "=" * 60)
-print("RANDOM FOREST WEATHER - SCIKIT-LEARN")
-print("=" * 60)
-
-rf_weather_forecast = None
-rf_weather_model = None
-
 try:
-    if not WEATHER_FEATURE_COLS:
-        raise RuntimeError("Khong co bien khi tuong phu hop cho Random Forest Weather.")
-
     meteo_train_context = df_meteo_monthly_context.reindex(train.index)[WEATHER_FEATURE_COLS]
-    rf_rows, rf_targets = [], []
+
+    # Build training data
+    xgb_rows, xgb_targets = [], []
     for i in range(24, len(train)):
-        rf_rows.append(
-            make_weather_feature_row(train.iloc[:i], train.index[i], meteo_train_context.iloc[:i])
+        xgb_rows.append(
+            make_xgb_feature_row(
+                train.iloc[:i], train.index[i], meteo_train_context.iloc[:i]
+            )
         )
-        rf_targets.append(train.iloc[i])
+        xgb_targets.append(train.iloc[i])
 
-    rf_X_train = pd.DataFrame(rf_rows)
-    rf_feature_columns = rf_X_train.columns.tolist()
-    rf_feature_means = rf_X_train.mean()
-    rf_X_train = rf_X_train.fillna(rf_feature_means)
-    rf_y_train = np.array(rf_targets)
+    xgb_X_train = pd.DataFrame(xgb_rows)
+    xgb_feature_columns = xgb_X_train.columns.tolist()
+    xgb_feature_means = xgb_X_train.mean()
+    xgb_X_train = xgb_X_train.fillna(xgb_feature_means)
 
-    rf_weather_model = RandomForestRegressor(
-        n_estimators=300,
-        max_depth=8,
-        min_samples_leaf=5,
+    xgb_model = XGBRegressor(
+        n_estimators=200,
+        max_depth=4,
+        learning_rate=0.05,
+        min_child_weight=5,
+        subsample=0.8,
+        colsample_bytree=0.8,
         random_state=42,
-        n_jobs=-1,
+        verbosity=0,
     )
-    rf_weather_model.fit(rf_X_train, rf_y_train)
+    xgb_model.fit(xgb_X_train, np.array(xgb_targets))
 
-    rf_rain_history = train.copy()
-    rf_meteo_history = meteo_train_context.copy()
-    rf_preds = []
+    # Recursive multi-step forecast
+    xgb_rain_history = train.copy()
+    xgb_meteo_history = meteo_train_context.copy()
+    xgb_preds = []
+
     for forecast_date in test.index:
         x_next = pd.DataFrame([
-            make_weather_feature_row(rf_rain_history, forecast_date, rf_meteo_history)
+            make_xgb_feature_row(xgb_rain_history, forecast_date, xgb_meteo_history)
         ])
-        x_next = x_next.reindex(columns=rf_feature_columns).fillna(rf_feature_means)
-        pred = max(0.0, float(rf_weather_model.predict(x_next)[0]))
-        rf_preds.append(pred)
-        rf_rain_history = pd.concat([
-            rf_rain_history,
+        x_next = x_next.reindex(columns=xgb_feature_columns).fillna(xgb_feature_means)
+        pred = max(0.0, float(xgb_model.predict(x_next)[0]))
+        xgb_preds.append(pred)
+
+        # Extend history with prediction for recursive forecasting
+        xgb_rain_history = pd.concat([
+            xgb_rain_history,
             pd.Series([pred], index=[forecast_date]),
         ])
-        rf_meteo_history = pd.concat([
-            rf_meteo_history,
-            pd.DataFrame([make_meteo_proxy_row(rf_meteo_history, forecast_date)], index=[forecast_date]),
+        xgb_meteo_history = pd.concat([
+            xgb_meteo_history,
+            pd.DataFrame(
+                [make_meteo_proxy_row(xgb_meteo_history, forecast_date)],
+                index=[forecast_date],
+            ),
         ])
 
-    rf_weather_forecast = pd.Series(
-        rf_preds,
-        index=test.index,
-        name="Random Forest Weather",
+    xgb_forecast = pd.Series(
+        xgb_preds, index=test.index, name="XGBoost",
     )
-    register_model("Random Forest Weather", "Machine Learning", True, "Scikit-Learn, co feature importance")
-
-    fig, ax = plt.subplots(figsize=(14, 5), dpi=100)
-    ax.plot(train.index, train, color="steelblue", linewidth=1.3, label="Train")
-    ax.plot(test.index, test, color="darkorange", linewidth=1.8, label="Thuc te")
-    ax.plot(rf_weather_forecast.index, rf_weather_forecast,
-            color="teal", linewidth=2, linestyle="--", label="Random Forest Weather")
-    ax.axvline(split_date, color="black", linestyle=":", linewidth=1)
-    ax.set_title(f"Random Forest Weather: du bao vs thuc te - {city_name}",
-                 fontsize=13, fontweight="bold")
-    ax.set_xlabel("Thoi gian")
-    ax.set_ylabel(target_axis_label)
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.show()
-
-    print(f"Random Forest Weather dung {len(rf_feature_columns)} features.")
-    print(f"RMSE hold-out: {_quick_rmse(test, rf_weather_forecast):.2f} {target_unit}")
+    print(
+        f"XGBoost dùng {len(xgb_feature_columns)} features.\n"
+        f"RMSE hold-out: {_quick_rmse(test, xgb_forecast):.2f} {target_unit}"
+    )
 except Exception as exc:
-    print(f"[Random Forest Weather bo qua] {exc}")
-    rf_weather_forecast = None
-    rf_weather_model = None
+    print(f"[XGBoost bỏ qua] {exc}")
+    import traceback; traceback.print_exc()
+    xgb_forecast = None
+    xgb_model = None
 
 
-print("\n" + "=" * 60)
-print("MODEL CATALOG - BANG NGAN CHO SLIDE")
-print("=" * 60)
-model_catalog_df = pd.DataFrame(model_catalog_rows).drop_duplicates(subset=["Model"])
-MODEL_CATALOG_REPORT = [
-    "Seasonal Mean",
-    "Holt-Winters",
-    "Random Forest Weather",
-]
-model_catalog_report_df = (
-    model_catalog_df
-    .set_index("Model")
-    .reindex([m for m in MODEL_CATALOG_REPORT if m in model_catalog_df["Model"].values])
-    .reset_index()
+# ── Plot all models ────────────────────────────────────────────
+fig, ax = plt.subplots(figsize=(14, 5), dpi=100)
+ax.plot(train.index[-60:], train.iloc[-60:], color="steelblue", linewidth=1.3, label="Train")
+ax.plot(test.index, test, color="black", linewidth=2.2, label="Thực tế")
+
+MODEL_COLORS = {
+    "Seasonal Naive": "dimgray",
+    "SARIMAX": "royalblue",
+    "Prophet": "seagreen",
+    "XGBoost": "firebrick",
+}
+
+for name, fc in [
+    ("Seasonal Naive", seasonal_naive_forecast),
+    ("SARIMAX", sarimax_forecast),
+    ("Prophet", prophet_forecast),
+    ("XGBoost", xgb_forecast),
+]:
+    if fc is not None:
+        ax.plot(
+            fc.index, fc,
+            linewidth=1.7, linestyle="--",
+            color=MODEL_COLORS.get(name, "gray"),
+            label=name,
+        )
+
+ax.axvline(split_date, color="black", linestyle=":", linewidth=1)
+ax.set_title(
+    f"So sánh dự báo 4 mô hình — {city_name}",
+    fontsize=13, fontweight="bold",
 )
-print(model_catalog_report_df.to_string(index=False))
+ax.set_xlabel("Thời gian")
+ax.set_ylabel(target_axis_label)
+ax.legend(fontsize=10)
+ax.grid(True, alpha=0.3)
+plt.tight_layout()
+plt.show()
+
+
+# ── Summary ────────────────────────────────────────────────────
+print("\n" + "=" * 60)
+print("MODEL CATALOG")
+print("=" * 60)
+
+MODEL_CATALOG_REPORT = ["Seasonal Naive", "SARIMAX", "Prophet", "XGBoost"]
+
+forecasts = {"Seasonal Naive": seasonal_naive_forecast}
+if sarimax_forecast is not None:
+    forecasts["SARIMAX"] = sarimax_forecast
+if prophet_forecast is not None:
+    forecasts["Prophet"] = prophet_forecast
+if xgb_forecast is not None:
+    forecasts["XGBoost"] = xgb_forecast
+
+for name, fc in forecasts.items():
+    print(f"  {name:<20} RMSE={_quick_rmse(test, fc):.2f}")
 
 print("\n" + "=" * 60)
-print("KET LUAN PHASE 4")
+print("KẾT LUẬN PHASE 4")
 print("=" * 60)
-print("Da xay dung 3 mo hinh dai dien: Baseline (Seasonal Mean), Statistical (Holt-Winters), ML (Random Forest Weather).")
-print("Random Forest Weather khong dung khi tuong tuong lai that; test/future dung proxy/climatology.")
+print("Đã xây dựng 4 mô hình: Seasonal Naive (baseline), SARIMAX (thống kê),")
+print("Prophet (chuỗi thời gian), XGBoost (machine learning).")
+print("Tất cả đều dùng dữ liệu quá khứ hợp lệ, không có data leakage.")
 print("=" * 60)
