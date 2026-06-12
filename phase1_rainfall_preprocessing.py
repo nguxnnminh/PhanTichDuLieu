@@ -1,8 +1,3 @@
-# Phase 1: Tải dữ liệu & Tiền xử lý
-# ─────────────────────────────────────────────────────────────────
-# Đọc dữ liệu monthly đã được tổng hợp từ 7 tọa độ đại diện TP.HCM.
-# Kiểm tra chất lượng, impute nếu cần, chuẩn bị df_monthly cho pipeline.
-
 import os
 import warnings
 
@@ -12,8 +7,6 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 warnings.filterwarnings("ignore")
-
-# ── Constants ──────────────────────────────────────────────────
 OPENMETEO_MONTHLY_PATH = "hcmc_openmeteo_monthly.csv"
 city_name = "TP. Hồ Chí Minh"
 
@@ -36,8 +29,6 @@ VERBOSE_PHASE1 = False
 
 print("✅ Tất cả thư viện đã được import thành công.")
 
-
-# ── Quality classification ─────────────────────────────────────
 def classify_month(row):
     v, e = row["ValidDays"], row["ExpectedDays"]
     if v == e:
@@ -53,7 +44,7 @@ def classify_month(row):
 def impute_monthly_rainfall(df_monthly: pd.DataFrame) -> pd.DataFrame:
     df_monthly = df_monthly.copy()
 
-    # Loại tháng cuối nếu chưa đủ dữ liệu
+    # Bỏ tháng cuối nếu chưa đủ dữ liệu.
     last_idx = df_monthly.index[-1]
     last_quality = df_monthly.loc[last_idx, "Quality"]
     if last_quality != "Du":
@@ -98,7 +89,6 @@ def impute_monthly_rainfall(df_monthly: pd.DataFrame) -> pd.DataFrame:
     return df_monthly
 
 
-# ── Load data ──────────────────────────────────────────────────
 if not os.path.exists(OPENMETEO_MONTHLY_PATH):
     raise FileNotFoundError(
         f"Không tìm thấy {OPENMETEO_MONTHLY_PATH}. "
@@ -141,7 +131,6 @@ df_monthly["MissingRainValues"] = df_monthly["ExpectedDays"] - df_monthly["Valid
 df_monthly["MissingRows"] = df_monthly["ExpectedDays"] - df_monthly["RowDays"]
 df_monthly["Quality"] = df_monthly.apply(classify_month, axis=1)
 
-# Biến khí tượng context
 meteo_exclude = {
     "Rainfall", "Precipitation", "RainfallDays", "ExpectedDays", "Completeness",
     "RowDays", "ValidDays", "MissingRainValues", "MissingRows", "Quality",
@@ -152,7 +141,6 @@ available_meteo_cols = [
 ]
 df_meteo_monthly_context = df_monthly[available_meteo_cols].copy()
 
-# ── Quality report ─────────────────────────────────────────────
 print("=" * 60)
 print("KIỂM TRA CHẤT LƯỢNG THÁNG")
 print("=" * 60)
@@ -176,12 +164,10 @@ for label in ["Trong hoan toan", "Thieu nhieu", "Gan du"]:
 df_monthly = impute_monthly_rainfall(df_monthly)
 df_meteo_monthly_context = df_meteo_monthly_context.reindex(df_monthly.index)
 
-# ── Calendar columns ───────────────────────────────────────────
 df_monthly["Year"] = df_monthly.index.year.astype(int)
 df_monthly["Month"] = df_monthly.index.month.astype(int)
 df_monthly["Quarter"] = df_monthly.index.quarter.astype(int)
 
-# ── Summary ────────────────────────────────────────────────────
 n_du = (df_monthly["Quality"] == "Du").sum()
 n_gan_du = (df_monthly["Quality"] == "Gan du").sum()
 n_thieu_nhieu = (df_monthly["Quality"] == "Thieu nhieu").sum()

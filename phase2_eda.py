@@ -1,5 +1,3 @@
-# Phase 2: Phân tích khám phá dữ liệu (EDA)
-
 from statsmodels.tsa.stattools import adfuller, kpss
 from statsmodels.tsa.seasonal import seasonal_decompose
 from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
@@ -20,8 +18,6 @@ project_title = globals().get(
     "Phân tích và dự báo lượng mưa trung bình của Thành phố Hồ Chí Minh "
     "dựa trên dữ liệu khí tượng",
 )
-
-# ── Descriptive statistics ─────────────────────────────────────
 print("=" * 55)
 print(f"THỐNG KÊ MÔ TẢ — {target_axis_label}")
 print("=" * 55)
@@ -59,7 +55,6 @@ if kurt_val > 0:
 else:
     print("  → Platykurtic: đuôi nhẹ — ít giá trị ngoại lệ.")
 
-# ── Weather correlation ────────────────────────────────────────
 meteo_corr = pd.Series(dtype=float)
 top_meteo_correlations = pd.Series(dtype=float)
 
@@ -114,7 +109,6 @@ if "df_meteo_monthly_context" in globals() and not df_meteo_monthly_context.empt
 else:
     print("\n[Lưu ý] Không có biến khí tượng bổ sung để phân tích tương quan.")
 
-# ── Time series plot ───────────────────────────────────────────
 fig, ax = plt.subplots(figsize=(14, 5), dpi=100)
 
 ax.plot(
@@ -151,7 +145,6 @@ ax.grid(True, alpha=0.3)
 plt.tight_layout()
 plt.show()
 
-# ── Monthly bar chart ──────────────────────────────────────────
 monthly_stats = df_monthly.groupby("Month")["Rainfall"].agg(["mean", "std"]).reset_index()
 norm_values = (monthly_stats["mean"] - monthly_stats["mean"].min()) / (
     monthly_stats["mean"].max() - monthly_stats["mean"].min()
@@ -182,7 +175,6 @@ ax.grid(axis="y", alpha=0.3)
 plt.tight_layout()
 plt.show()
 
-# ── Boxplot ────────────────────────────────────────────────────
 overall_mean = df_monthly["Rainfall"].mean()
 df_monthly["NhanThang"] = df_monthly.index.month.map(
     dict(zip(range(1, 13), thang_ngan))
@@ -222,7 +214,6 @@ plt.show()
 
 df_monthly.drop(columns=["NhanThang"], inplace=True)
 
-# ── Seasonal decomposition ─────────────────────────────────────
 decomposition = seasonal_decompose(
     df_monthly["Rainfall"], model="additive", period=12
 )
@@ -251,7 +242,6 @@ axes[-1].set_xlabel("Thời gian", fontsize=11)
 plt.tight_layout()
 plt.show()
 
-# ── Stationarity tests ─────────────────────────────────────────
 series_ts = df_monthly["Rainfall"].asfreq("MS").dropna()
 
 print("\n" + "=" * 70)
@@ -291,7 +281,6 @@ stationarity_summary_df = pd.DataFrame([
 ])
 print(stationarity_summary_df.to_string(index=False, float_format=lambda x: f"{x:.4f}"))
 
-# ── ACF / PACF ─────────────────────────────────────────────────
 fig, axes = plt.subplots(1, 2, figsize=(14, 4), dpi=100)
 plot_acf(series_ts, lags=48, ax=axes[0])
 plot_pacf(series_ts, lags=48, ax=axes[1], method="ywm")
@@ -300,7 +289,6 @@ axes[1].set_title("PACF — Rainfall (48 lags)", fontsize=12, fontweight="bold")
 plt.tight_layout()
 plt.show()
 
-# ── Seasonal plot (last 15 years) ──────────────────────────────
 seasonal_plot_data = df_monthly.pivot_table(
     index="Month", columns="Year", values="Rainfall", aggfunc="mean"
 )
@@ -336,7 +324,6 @@ ax.legend(fontsize=8, ncol=4)
 plt.tight_layout()
 plt.show()
 
-# ── Season strength ────────────────────────────────────────────
 month_avg = df_monthly.groupby("Month")["Rainfall"].mean()
 thang_mua_nhat = month_avg.idxmax()
 thang_kho_nhat = month_avg.idxmin()

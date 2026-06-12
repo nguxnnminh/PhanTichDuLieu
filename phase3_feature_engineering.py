@@ -1,11 +1,3 @@
-# Phase 3: Feature Engineering cho Machine Learning
-# ─────────────────────────────────────────────────────────────
-# Nguyên tắc chống leakage:
-# - Lag/rolling của Rainfall chỉ dùng dữ liệu quá khứ.
-# - Rolling features bắt buộc dùng shift(1).rolling(...).
-# - Biến khí tượng không dùng giá trị cùng tháng làm feature forecast.
-# - Chỉ tạo weather lag/rolling features từ quá khứ.
-
 print("=" * 70)
 print("PHASE 3 — FEATURE ENGINEERING")
 print("=" * 70)
@@ -40,6 +32,7 @@ def build_ml_features(df_monthly: pd.DataFrame):
     df = df.sort_index()
     y = df["Rainfall"].asfreq("MS")
 
+    # Chống leakage: lag/rolling chỉ dùng dữ liệu trước tháng dự báo.
     feature_groups = {
         "time": [],
         "fourier": [],
@@ -49,14 +42,12 @@ def build_ml_features(df_monthly: pd.DataFrame):
         "weather_rolling": [],
     }
 
-    # ── Time / calendar features ──
     df["month"] = df.index.month
     df["quarter"] = df.index.quarter
     df["month_sin"] = np.sin(2 * np.pi * df["month"] / 12)
     df["month_cos"] = np.cos(2 * np.pi * df["month"] / 12)
     feature_groups["time"].extend(["month", "quarter", "month_sin", "month_cos"])
 
-    # ── Fourier features ──
     for k in [1, 2, 3]:
         sin_col = f"fourier_sin_{k}"
         cos_col = f"fourier_cos_{k}"
@@ -64,13 +55,11 @@ def build_ml_features(df_monthly: pd.DataFrame):
         df[cos_col] = np.cos(2 * np.pi * k * df.index.month / 12)
         feature_groups["fourier"].extend([sin_col, cos_col])
 
-    # ── Rainfall lag features ──
     for lag in [1, 2, 3, 6, 12, 24, 36]:
         col = f"rain_lag_{lag}"
         df[col] = y.shift(lag)
         feature_groups["rainfall_lag"].append(col)
 
-    # ── Rainfall rolling features (shift(1) to prevent leakage) ──
     for window in [3, 6, 12, 24]:
         mean_col = f"rain_roll_mean_{window}"
         std_col = f"rain_roll_std_{window}"
@@ -78,7 +67,6 @@ def build_ml_features(df_monthly: pd.DataFrame):
         df[std_col] = y.shift(1).rolling(window).std()
         feature_groups["rainfall_rolling"].extend([mean_col, std_col])
 
-    # ── Weather lag/rolling features ──
     available_weather_cols = [c for c in WEATHER_BASE_COLS if c in df.columns]
     for col in available_weather_cols:
         lag1 = f"{col}_lag1"
@@ -92,7 +80,6 @@ def build_ml_features(df_monthly: pd.DataFrame):
         feature_groups["weather_lag"].extend([lag1, lag3])
         feature_groups["weather_rolling"].extend([roll3, roll12])
 
-    # ── Assemble ──
     feature_df = df.dropna().copy()
     y_ml = feature_df["Rainfall"].copy()
 

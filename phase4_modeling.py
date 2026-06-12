@@ -1,10 +1,3 @@
-# Phase 4: Modeling — 4 mô hình chính
-# ─────────────────────────────────────────────────────────────
-# 1. Seasonal Naive   : y_hat(t) = y(t-12)
-# 2. SARIMAX          : auto_arima + exogenous lag weather hợp lệ
-# 3. Prophet           : Facebook Prophet, yearly seasonality
-# 4. XGBoost Regressor : lag, rolling, Fourier, weather lag features
-
 import os
 import warnings
 warnings.filterwarnings("ignore")
@@ -17,8 +10,6 @@ from xgboost import XGBRegressor
 target_label = globals().get("TARGET_LABEL", "Lượng mưa trung bình tháng")
 target_unit = globals().get("TARGET_UNIT", "mm/tháng")
 target_axis_label = f"{target_label} ({target_unit})"
-
-# ── Train / Test split ─────────────────────────────────────────
 TEST_SIZE = 24
 series = df_monthly["Rainfall"].asfreq("MS")
 train = series.iloc[:-TEST_SIZE]
@@ -59,9 +50,6 @@ def _quick_rmse(actual, predicted):
     return float(np.sqrt(mean_squared_error(actual, predicted)))
 
 
-# ============================================================
-# MODEL 1: SEASONAL NAIVE — y_hat(t) = y(t-12)
-# ============================================================
 print("\n" + "=" * 60)
 print("MODEL 1: SEASONAL NAIVE")
 print("=" * 60)
@@ -76,9 +64,6 @@ print(
     f"RMSE hold-out: {_quick_rmse(test, seasonal_naive_forecast):.2f} {target_unit}"
 )
 
-# ============================================================
-# MODEL 2: SARIMAX
-# ============================================================
 print("\n" + "=" * 60)
 print("MODEL 2: SARIMAX")
 print("=" * 60)
@@ -88,7 +73,6 @@ sarimax_fit = None
 sarimax_order = None
 sarimax_seasonal_order = None
 
-# --- Tạo exogenous hợp lệ: dùng lag-1 của weather variables ---
 SARIMAX_EXOG_COLS = [
     c for c in [
         "HumidityMean", "CloudCoverMean", "DewPointMean",
@@ -98,15 +82,14 @@ SARIMAX_EXOG_COLS = [
 ]
 
 try:
-    # Build exogenous from lag-1 (no current-month leakage)
+    # Exogenous dùng lag-1 để tránh leakage.
     exog_full = df_meteo_monthly_context.reindex(series.index)[SARIMAX_EXOG_COLS]
-    exog_full = exog_full.shift(1)  # lag-1 to avoid leakage
+    exog_full = exog_full.shift(1)
     exog_full = exog_full.interpolate(method="time").ffill().bfill()
 
     exog_train = exog_full.iloc[:-TEST_SIZE]
     exog_test = exog_full.iloc[-TEST_SIZE:]
 
-    # auto_arima to find best order
     print("Đang chạy auto_arima (có thể mất 1-2 phút)...")
     auto_model = auto_arima(
         train,
@@ -129,7 +112,6 @@ try:
 
     print(f"Best order: SARIMAX{sarimax_order}x{sarimax_seasonal_order}")
 
-    # Refit with statsmodels for proper forecasting
     sarimax_model = SARIMAX(
         train,
         exog=exog_train,
@@ -155,9 +137,6 @@ except Exception as exc:
     sarimax_forecast = None
     sarimax_fit = None
 
-# ============================================================
-# MODEL 3: PROPHET
-# ============================================================
 print("\n" + "=" * 60)
 print("MODEL 3: PROPHET")
 print("=" * 60)
@@ -165,7 +144,6 @@ print("=" * 60)
 prophet_forecast = None
 
 try:
-    # Prophet needs ds, y format
     prophet_train = pd.DataFrame({
         "ds": train.index,
         "y": train.values,
@@ -183,7 +161,6 @@ try:
     future_dates = prophet_model.make_future_dataframe(periods=TEST_SIZE, freq="MS")
     prophet_pred = prophet_model.predict(future_dates)
 
-    # Extract test period predictions
     prophet_test_pred = prophet_pred.iloc[-TEST_SIZE:]
     prophet_forecast = pd.Series(
         np.clip(prophet_test_pred["yhat"].values, 0, None),
@@ -197,9 +174,6 @@ except Exception as exc:
     print(f"[Prophet bỏ qua] {exc}")
     prophet_forecast = None
 
-# ============================================================
-# MODEL 4: XGBOOST REGRESSOR
-# ============================================================
 print("\n" + "=" * 60)
 print("MODEL 4: XGBOOST REGRESSOR")
 print("=" * 60)
@@ -224,7 +198,7 @@ WEATHER_FEATURE_COLS = [
 
 def make_xgb_feature_row(history: pd.Series, forecast_date: pd.Timestamp,
                           meteo_history: pd.DataFrame = None) -> dict:
-    """Build one feature row for XGBoost — only uses past data."""
+    """Build one XGBoost row from past data only."""
     month = forecast_date.month
     row = {
         "month": month,
@@ -236,24 +210,20 @@ def make_xgb_feature_row(history: pd.Series, forecast_date: pd.Timestamp,
         "fourier_cos_3": np.cos(2 * np.pi * 3 * month / 12),
     }
 
-    # Rainfall lag features
     for lag in [1, 2, 3, 6, 12, 24]:
         row[f"rain_lag_{lag}"] = (
             history.iloc[-lag] if len(history) >= lag else np.nan
         )
 
-    # Rainfall rolling features (already shifted by using history up to t-1)
     for window in [3, 6, 12, 24]:
         vals = history.iloc[-window:] if len(history) >= window else history
         row[f"rain_roll_mean_{window}"] = float(vals.mean()) if len(vals) > 0 else np.nan
         row[f"rain_roll_std_{window}"] = float(vals.std()) if len(vals) > 1 else np.nan
 
-    # Same-month climatology from history
     same_month = history[history.index.month == month]
     row["rain_clim_mean"] = float(same_month.mean()) if len(same_month) > 0 else np.nan
     row["rain_clim_median"] = float(same_month.median()) if len(same_month) > 0 else np.nan
 
-    # Weather lag features (lag-1, lag-3, rolling-3, rolling-12)
     if meteo_history is not None and not meteo_history.empty:
         for col in WEATHER_FEATURE_COLS:
             if col not in meteo_history.columns:
@@ -285,7 +255,6 @@ def make_meteo_proxy_row(meteo_history: pd.DataFrame,
 try:
     meteo_train_context = df_meteo_monthly_context.reindex(train.index)[WEATHER_FEATURE_COLS]
 
-    # Build training data
     xgb_rows, xgb_targets = [], []
     for i in range(24, len(train)):
         xgb_rows.append(
@@ -312,7 +281,6 @@ try:
     )
     xgb_model.fit(xgb_X_train, np.array(xgb_targets))
 
-    # Recursive multi-step forecast
     xgb_rain_history = train.copy()
     xgb_meteo_history = meteo_train_context.copy()
     xgb_preds = []
@@ -325,7 +293,6 @@ try:
         pred = max(0.0, float(xgb_model.predict(x_next)[0]))
         xgb_preds.append(pred)
 
-        # Extend history with prediction for recursive forecasting
         xgb_rain_history = pd.concat([
             xgb_rain_history,
             pd.Series([pred], index=[forecast_date]),
@@ -351,8 +318,6 @@ except Exception as exc:
     xgb_forecast = None
     xgb_model = None
 
-
-# ── Plot all models ────────────────────────────────────────────
 fig, ax = plt.subplots(figsize=(14, 5), dpi=100)
 ax.plot(train.index[-60:], train.iloc[-60:], color="steelblue", linewidth=1.3, label="Train")
 ax.plot(test.index, test, color="black", linewidth=2.2, label="Thực tế")
@@ -390,8 +355,6 @@ ax.grid(True, alpha=0.3)
 plt.tight_layout()
 plt.show()
 
-
-# ── Summary ────────────────────────────────────────────────────
 print("\n" + "=" * 60)
 print("MODEL CATALOG")
 print("=" * 60)

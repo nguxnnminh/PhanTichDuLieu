@@ -1,18 +1,4 @@
-"""Download Open-Meteo historical weather for Ho Chi Minh City.
-
-Multi-point strategy:
-    7 coordinates spanning HCMC are queried.  For every day the
-    *spatial mean* across all points is computed first, then the daily
-    values are aggregated to monthly totals / means.
-
-    Target  = sum of daily spatial-mean rainfall  per month  (mm/month)
-    Weather = spatial-mean of each daily/hourly variable  per month
-
-Output files
-    hcmc_openmeteo_daily.csv   – daily spatial-mean values
-    hcmc_openmeteo_monthly.csv – monthly aggregation
-    hcmc_openmeteo_metadata.json
-"""
+"""Download Open-Meteo data and aggregate 7 HCMC points to daily/monthly files."""
 
 import calendar
 import json
@@ -26,8 +12,6 @@ from datetime import date, timedelta
 import numpy as np
 import pandas as pd
 
-
-# ── 7 representative coordinates for HCMC ──────────────────────
 HCMC_POINTS = [
     {"name": "Center_Q1Q3",    "lat": 10.7769, "lon": 106.7009},
     {"name": "NorthWest_CuChi", "lat": 11.0500, "lon": 106.5000},
@@ -76,8 +60,6 @@ MONTHLY_PATH = "hcmc_openmeteo_monthly.csv"
 METADATA_PATH = "hcmc_openmeteo_metadata.json"
 CACHE_DIR = "openmeteo_cache"
 
-
-# ── HTTP helpers ────────────────────────────────────────────────
 def _request_json(url: str, cache_path: str) -> dict:
     """GET JSON with caching and retry."""
     if os.path.exists(cache_path):
@@ -133,8 +115,6 @@ def yearly_ranges(start_date: date, end_date: date):
         yield current, chunk_end
         current = chunk_end + timedelta(days=1)
 
-
-# ── Parse payload → daily DataFrame ────────────────────────────
 DAILY_COL_MAP = {
     "rain_sum": "Rainfall",
     "precipitation_sum": "Precipitation",
@@ -180,8 +160,6 @@ def hourly_from_payload(payload: dict) -> pd.DataFrame:
         df[col_name] = hourly.get(api_key)
     return df
 
-
-# ── Download all points for one year chunk ──────────────────────
 def download_year_chunk(start: date, end: date) -> tuple[list[pd.DataFrame], list[pd.DataFrame]]:
     """Return (list_of_daily_dfs, list_of_hourly_dfs) — one per point."""
     daily_list, hourly_list = [], []
@@ -191,17 +169,15 @@ def download_year_chunk(start: date, end: date) -> tuple[list[pd.DataFrame], lis
         hf = hourly_from_payload(payload)
         if not hf.empty:
             hourly_list.append(hf)
-        time.sleep(0.6)  # polite rate limiting
+        time.sleep(0.6)  # Rate limit nhẹ cho API.
     return daily_list, hourly_list
 
 
-# ── Spatial mean ────────────────────────────────────────────────
 def spatial_mean_daily(frames: list[pd.DataFrame]) -> pd.DataFrame:
     """Average daily values across all coordinate points."""
     if not frames:
         return pd.DataFrame()
 
-    # Align on Date
     merged = frames[0][["Date"]].copy()
     numeric_cols = [c for c in frames[0].columns if c != "Date"]
     for col in numeric_cols:
@@ -228,8 +204,6 @@ def spatial_mean_hourly(frames: list[pd.DataFrame]) -> pd.DataFrame:
         merged[col] = stacked.mean(axis=1).values
     return merged
 
-
-# ── Monthly aggregation ─────────────────────────────────────────
 def build_hourly_monthly(df_hourly: pd.DataFrame) -> pd.DataFrame:
     if df_hourly.empty:
         return pd.DataFrame()
@@ -312,8 +286,6 @@ def build_monthly(df_daily: pd.DataFrame, df_hourly: pd.DataFrame) -> pd.DataFra
     ]
     return monthly[[c for c in columns if c in monthly.columns]]
 
-
-# ── Main ────────────────────────────────────────────────────────
 def main():
     print(f"=== Downloading Open-Meteo data for {CITY} ===")
     print(f"Points: {len(HCMC_POINTS)}")
@@ -329,7 +301,6 @@ def main():
         print(f"Downloading {start} -> {end} ({len(HCMC_POINTS)} points) ...")
         daily_list, hourly_list = download_year_chunk(start, end)
 
-        # Spatial mean across points
         sm_daily = spatial_mean_daily(daily_list)
         all_daily_frames.append(sm_daily)
 
@@ -339,7 +310,6 @@ def main():
 
         time.sleep(0.5)
 
-    # Combine all years
     df_daily = (
         pd.concat(all_daily_frames, ignore_index=True)
         .drop_duplicates(subset=["Date"])
@@ -357,7 +327,6 @@ def main():
 
     df_monthly = build_monthly(df_daily, df_hourly)
 
-    # Save
     df_daily.to_csv(DAILY_PATH, index=False)
     df_monthly.to_csv(MONTHLY_PATH, index=False)
 

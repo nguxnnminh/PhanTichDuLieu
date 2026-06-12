@@ -1,5 +1,3 @@
-# Phase 7: Residual Diagnostics — tất cả 4 mô hình
-
 from statsmodels.graphics.tsaplots import plot_acf
 from statsmodels.stats.diagnostic import acorr_ljungbox
 
@@ -25,7 +23,6 @@ for model_name, fc in forecasts.items():
     print(f"Mean         : {residuals.mean():.3f}")
     print(f"Std          : {residuals.std():.3f}")
 
-    # Ljung-Box test
     ljung_lags = [lag for lag in [6, 12] if lag < len(residuals)]
     if ljung_lags:
         ljung_box_df = acorr_ljungbox(residuals, lags=ljung_lags, return_df=True)
@@ -41,8 +38,6 @@ for model_name, fc in forecasts.items():
 
     residual_conclusions[model_name] = conclusion
 
-
-# ── Plot residuals for best model ──────────────────────────────
 best_model = globals().get("forecast_model_name", list(forecasts.keys())[0])
 best_residuals = (test - forecasts[best_model]).dropna()
 
@@ -75,7 +70,6 @@ for model_name, conclusion in residual_conclusions.items():
     print(f"  {model_name:<20}: {conclusion}")
 print("=" * 60)
 
-# Keep for Phase 8
 residual_diagnostic_conclusion = residual_conclusions.get(best_model, "N/A")
 
 print("\n✅ Phase 7 hoàn tất — Residual diagnostics đã xong.")

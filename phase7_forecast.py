@@ -1,8 +1,3 @@
-# Phase 8: Forecast 12 tháng tương lai
-# ─────────────────────────────────────────────────────────────
-# Refit tất cả 4 mô hình trên toàn bộ dữ liệu lịch sử,
-# sau đó forecast 12 tháng tiếp theo.
-
 from prophet import Prophet
 from xgboost import XGBRegressor
 
@@ -48,13 +43,10 @@ print("=" * 60)
 print(f"DỰ BÁO 12 THÁNG TƯƠNG LAI — TẤT CẢ 4 MÔ HÌNH")
 print("=" * 60)
 
-
-# ── Forecast storage ───────────────────────────────────────────
 future_forecasts = {}
 future_intervals = {}
 
 
-# ── 1. Seasonal Naive ──────────────────────────────────────────
 print("\n[Seasonal Naive] Refit...")
 sn_fc = pd.Series(
     [full_series[full_series.index.month == d.month].iloc[-1] for d in future_index],
@@ -70,8 +62,6 @@ future_forecasts["Seasonal Naive"] = sn_fc
 future_intervals["Seasonal Naive"] = (sn_lower, sn_upper)
 print(f"  → OK")
 
-
-# ── 2. SARIMAX ─────────────────────────────────────────────────
 print("\n[SARIMAX] Refit trên toàn bộ dữ liệu...")
 try:
     _order = globals().get("sarimax_order", (1, 0, 1))
@@ -80,7 +70,7 @@ try:
     exog_full = df_meteo_monthly_context.reindex(full_series.index)[SARIMAX_EXOG_COLS]
     exog_full = exog_full.shift(1).interpolate(method="time").ffill().bfill()
 
-    # Exog for future: use climatology proxy
+    # Exog tương lai dùng climatology proxy.
     exog_future_rows = []
     for fd in future_index:
         proxy = {}
@@ -110,8 +100,6 @@ try:
 except Exception as exc:
     print(f"  → [Bỏ qua] {exc}")
 
-
-# ── 3. Prophet ─────────────────────────────────────────────────
 print("\n[Prophet] Refit trên toàn bộ dữ liệu...")
 try:
     prophet_train_full = pd.DataFrame({
@@ -145,8 +133,6 @@ try:
 except Exception as exc:
     print(f"  → [Bỏ qua] {exc}")
 
-
-# ── 4. XGBoost ─────────────────────────────────────────────────
 print("\n[XGBoost] Refit trên toàn bộ dữ liệu...")
 try:
     meteo_context_full = df_meteo_monthly_context.reindex(full_series.index)[WEATHER_FEATURE_COLS]
@@ -195,15 +181,12 @@ try:
 except Exception as exc:
     print(f"  → [Bỏ qua] {exc}")
 
-
-# ── Forecast table ─────────────────────────────────────────────
 THANG_VI = {
     1: "Tháng 1", 2: "Tháng 2", 3: "Tháng 3", 4: "Tháng 4",
     5: "Tháng 5", 6: "Tháng 6", 7: "Tháng 7", 8: "Tháng 8",
     9: "Tháng 9", 10: "Tháng 10", 11: "Tháng 11", 12: "Tháng 12",
 }
 
-# Use the best CV model for the main display
 future_forecast = future_forecasts[forecast_model_name]
 future_lower, future_upper = future_intervals[forecast_model_name]
 future_lower_display = future_lower.clip(lower=0)
@@ -237,7 +220,6 @@ print(
     f"({future_forecast[thang_kho]:.2f} {target_unit})"
 )
 
-# ── Comparison table all models ────────────────────────────────
 print("\n" + "=" * 80)
 print("SO SÁNH DỰ BÁO TẤT CẢ MÔ HÌNH")
 print("=" * 80)
@@ -250,8 +232,6 @@ comparison_df = pd.DataFrame(
 )
 print(comparison_df.to_string(float_format=lambda x: f"{x:.1f}"))
 
-
-# ── Plot: full history + forecast ──────────────────────────────
 best_color = MODEL_COLORS.get(forecast_model_name, "steelblue")
 
 fig, ax = plt.subplots(figsize=(16, 6), dpi=100)
@@ -274,8 +254,6 @@ ax.grid(True, alpha=0.3)
 plt.tight_layout()
 plt.show()
 
-
-# ── Plot: zoom last 24 + forecast ──────────────────────────────
 zoom_history = full_series.iloc[-24:]
 fig, ax = plt.subplots(figsize=(14, 5), dpi=100)
 ax.plot(
@@ -302,8 +280,6 @@ ax.grid(True, alpha=0.3)
 plt.tight_layout()
 plt.show()
 
-
-# ── Summary ────────────────────────────────────────────────────
 test_rmse = metrics_df.loc[forecast_model_name, "RMSE"]
 test_wape = metrics_df.loc[forecast_model_name, "WAPE (%)"]
 cv_rmse = globals().get("_cv_mean", {}).get(forecast_model_name, float("nan"))

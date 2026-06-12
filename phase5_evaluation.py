@@ -1,8 +1,3 @@
-# Phase 6: Evaluation — Rolling-Origin Cross Validation
-# ─────────────────────────────────────────────────────────────
-# Metrics: MAE, RMSE, WAPE, sMAPE, MASE
-# Rolling-origin CV: 6 cửa sổ × 12 tháng
-
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 target_label = globals().get("TARGET_LABEL", "Lượng mưa trung bình tháng")
@@ -16,8 +11,6 @@ MODEL_COLORS = {
     "XGBoost": "firebrick",
 }
 
-
-# ── Metrics ────────────────────────────────────────────────────
 def mae(actual, predicted):
     return float(mean_absolute_error(actual, predicted))
 
@@ -49,8 +42,6 @@ def mase(actual, predicted, train_series, season=12):
         return float("inf")
     return round(float(np.mean(np.abs(actual.values - predicted.values))) / scale, 4)
 
-
-# ── Collect forecasts from Phase 4 ────────────────────────────
 REPORT_MODELS = ["Seasonal Naive", "SARIMAX", "Prophet", "XGBoost"]
 
 forecasts = {"Seasonal Naive": seasonal_naive_forecast}
@@ -61,8 +52,6 @@ if globals().get("prophet_forecast") is not None:
 if globals().get("xgb_forecast") is not None:
     forecasts["XGBoost"] = xgb_forecast
 
-
-# ── Hold-out metrics ───────────────────────────────────────────
 rows = []
 for model_name, fc in forecasts.items():
     rows.append({
@@ -83,8 +72,6 @@ print(metrics_df.to_string())
 print("\nGhi chú: MAPE không được dùng vì tháng mùa khô có lượng mưa gần 0.")
 print("WAPE, RMSE và MASE là các chỉ số ưu tiên.")
 
-
-# ── Rolling-origin cross-validation ───────────────────────────
 N_CV = 6
 _cv_wins = []
 
@@ -96,8 +83,6 @@ for k in range(1, N_CV + 1):
 _cv_wins = _cv_wins[::-1]
 _win_labels = [f"{te.index[0]:%m/%y}–{te.index[-1]:%m/%y}" for _, te in _cv_wins]
 
-
-# ── CV model functions ─────────────────────────────────────────
 def _cv_seasonal_naive(tr, te):
     return pd.Series(
         [tr[tr.index.month == d.month].iloc[-1] for d in te.index],
@@ -216,8 +201,6 @@ for name in [m for m in REPORT_MODELS if m in _cv_mean]:
     ho = metrics_df.loc[name, "RMSE"] if name in metrics_df.index else float("nan")
     print(f"{name:<20}{_cv_mean[name]:>14.2f}{np.nanstd(arr):>10.2f}{ho:>12.2f}")
 
-
-# ── Select best model ─────────────────────────────────────────
 _cv_pool = [m for m in REPORT_MODELS if m in _cv_mean]
 forecast_model_name = min(_cv_pool, key=lambda m: _cv_mean[m]) if _cv_pool else "Seasonal Naive"
 forecast_forecast = forecasts[forecast_model_name]
@@ -231,8 +214,6 @@ print(f"Best hold-out RMSE       : {best_accuracy_model} ({metrics_df.loc[best_a
 print(f"Best CV model            : {forecast_model_name} ({_cv_mean.get(forecast_model_name, float('nan')):.2f})")
 print(f"Mô hình dự báo Phase 8  : {forecast_model_name}")
 
-
-# ── Comparison plot ────────────────────────────────────────────
 fig, ax = plt.subplots(figsize=(14, 5), dpi=100)
 ax.plot(test.index, test, color="black", linewidth=2.2, label="Thực tế")
 for name in REPORT_MODELS:
@@ -252,8 +233,6 @@ ax.grid(True, alpha=0.3)
 plt.tight_layout()
 plt.show()
 
-
-# ── Seasonal error analysis ───────────────────────────────────
 _WET_MONTHS = [5, 6, 7, 8, 9, 10, 11]
 _DRY_MONTHS = [12, 1, 2, 3, 4]
 _test_wet = test[test.index.month.isin(_WET_MONTHS)]
